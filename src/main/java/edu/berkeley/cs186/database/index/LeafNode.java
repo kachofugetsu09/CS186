@@ -177,12 +177,12 @@ class LeafNode extends BPlusNode {
         keys.add(insertIndex, key);
         rids.add(insertIndex, rid);
         
-        // 同步到磁盘
-        sync();
+
         
         // 检查是否需要分裂
         if (keys.size() <= 2 * metadata.getOrder()) {
             // 没有溢出，不需要分裂
+
             return Optional.empty();
         }
         

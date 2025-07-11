@@ -145,10 +145,10 @@ public class BPlusTree {
         // TODO(proj4_integration): Update the following line
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
-        // TODO(proj2): implement
-
-
-        return Optional.empty();
+        LeafNode leafNode = root.get(key);
+        
+        // 在叶子节点中查找RecordId并直接返回结果
+        return leafNode.getKey(key);
     }
 
     /**
@@ -254,14 +254,25 @@ public class BPlusTree {
         // TODO(proj4_integration): Update the following line
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
-        // TODO(proj2): implement
-        // Note: You should NOT update the root variable directly.
-        // Use the provided updateRoot() helper method to change
-        // the tree's root if the old root splits.
 
-
-
-        return;
+        Optional<Pair<DataBox, Long>> splitResult = root.put(key, rid);
+        
+        // 如果根节点分裂了，需要创建新的根节点
+        if (splitResult.isPresent()) {
+            DataBox splitKey = splitResult.get().getFirst();
+            long newChildPageNum = splitResult.get().getSecond();
+            
+            // 创建新的根节点，包含原根节点和新分裂出的节点
+            List<DataBox> newRootKeys = new ArrayList<>();
+            newRootKeys.add(splitKey);
+            
+            List<Long> newRootChildren = new ArrayList<>();
+            newRootChildren.add(root.getPage().getPageNum());
+            newRootChildren.add(newChildPageNum);
+            
+            // 使用updateRoot方法更新根节点
+            updateRoot(new InnerNode(metadata, bufferManager, newRootKeys, newRootChildren, lockContext));
+        }
     }
 
     /**
@@ -311,10 +322,7 @@ public class BPlusTree {
         // TODO(proj4_integration): Update the following line
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
-        // TODO(proj2): implement
-
-
-        return;
+        root.remove(key);
     }
 
     // Helpers /////////////////////////////////////////////////////////////////
