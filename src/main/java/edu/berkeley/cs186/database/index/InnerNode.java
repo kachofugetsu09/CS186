@@ -175,8 +175,57 @@ class InnerNode extends BPlusNode {
     @Override
     public Optional<Pair<DataBox, Long>> bulkLoad(Iterator<Pair<DataBox, RecordId>> data,
             float fillFactor) {
-        // TODO(proj2): implement
-
+        
+        while (data.hasNext()) {
+            // 获取最右边的子节点
+            int rightmostChildIndex = children.size() - 1;
+            long rightmostChildPageNum = children.get(rightmostChildIndex);
+            BPlusNode rightmostChild = BPlusNode.fromBytes(metadata, bufferManager, treeContext, rightmostChildPageNum);
+            
+            // 尝试向最右边的子节点批量加载数据
+            Optional<Pair<DataBox, Long>> splitResult = rightmostChild.bulkLoad(data, fillFactor);
+            
+            // 如果子节点没有分裂，说明数据已经全部加载完毕
+            if (!splitResult.isPresent()) {
+                break;
+            }
+            
+            // 子节点分裂了，需要将分裂结果添加到当前内部节点
+            DataBox splitKey = splitResult.get().getFirst();
+            long newChildPageNum = splitResult.get().getSecond();
+            
+            // 添加新的 key 和 child pointer
+            keys.add(splitKey);
+            children.add(newChildPageNum);
+            
+            // 检查当前内部节点是否需要分裂
+            if (keys.size() > 2 * metadata.getOrder()) {
+                // 当前节点溢出，需要分裂
+                int d = metadata.getOrder();
+                
+                // 中间的key将被推到父节点
+                DataBox pushUpKey = keys.get(d);
+                
+                // 创建右节点的keys和children
+                List<DataBox> rightKeys = new ArrayList<>(keys.subList(d + 1, keys.size()));
+                List<Long> rightChildren = new ArrayList<>(children.subList(d + 1, children.size()));
+                
+                // 更新左节点（当前节点）的keys和children
+                keys = new ArrayList<>(keys.subList(0, d));
+                children = new ArrayList<>(children.subList(0, d + 1));
+                
+                // 创建新的右节点
+                InnerNode rightNode = new InnerNode(metadata, bufferManager, rightKeys, rightChildren, treeContext);
+                
+                sync();
+                
+                // 返回分裂信息
+                return Optional.of(new Pair<>(pushUpKey, rightNode.getPage().getPageNum()));
+            }
+        }
+        
+        // 同步当前节点
+        sync();
         return Optional.empty();
     }
 

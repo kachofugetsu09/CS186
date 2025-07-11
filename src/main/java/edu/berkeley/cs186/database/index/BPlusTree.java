@@ -202,7 +202,6 @@ public class BPlusTree {
         // TODO(proj4_integration): Update the following line
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
-        // TODO(proj2): Return a BPlusTreeIterator.
         LeafNode leftmostLeaf = root.getLeftmostLeaf();
         if(leftmostLeaf != null && !leftmostLeaf.getKeys().isEmpty()){
             return new BPlusTreeIterator(leftmostLeaf, 0);
@@ -239,7 +238,6 @@ public class BPlusTree {
         // TODO(proj4_integration): Update the following line
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
-        // TODO(proj2): Return a BPlusTreeIterator.
         LeafNode leafNode = root.get(key);
         if(leafNode != null){
             int index = leafNode.getKeys().size(); // 默认设为末尾，表示没找到
@@ -294,11 +292,9 @@ public class BPlusTree {
             List<Long> newRootChildren = new ArrayList<>();
             newRootChildren.add(root.getPage().getPageNum());
             newRootChildren.add(newChildPageNum);
-            
-            // 使用updateRoot方法更新根节点
+             // 使用updateRoot方法更新根节点
             updateRoot(new InnerNode(metadata, bufferManager, newRootKeys, newRootChildren, lockContext));
         }
-
     }
 
     /**
@@ -324,13 +320,35 @@ public class BPlusTree {
         // TODO(proj4_integration): Update the following line
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
-        // TODO(proj2): implement
-        // Note: You should NOT update the root variable directly.
-        // Use the provided updateRoot() helper method to change
-        // the tree's root if the old root splits.
-
-        return;
+        // 检查树是否为空 - bulkLoad 只能在空树上进行
+        // 空树的特征是根节点是一个空的叶子节点
+        if (!(root instanceof LeafNode) || !((LeafNode) root).getKeys().isEmpty()) {
+            throw new BPlusTreeException("bulkLoad can only be called on an empty tree");
+        }
+        
+        // 调用根节点的 bulkLoad 方法，循环直到所有数据都被处理
+        while (data.hasNext()) {
+            Optional<Pair<DataBox, Long>> splitResult = root.bulkLoad(data, fillFactor);
+            
+            // 如果根节点分裂了，需要创建新的根节点
+            if (splitResult.isPresent()) {
+                DataBox splitKey = splitResult.get().getFirst();
+                long newChildPageNum = splitResult.get().getSecond();
+                
+                // 创建新的根节点，包含原根节点和新分裂出的节点
+                List<DataBox> newRootKeys = new ArrayList<>();
+                newRootKeys.add(splitKey);
+                
+                List<Long> newRootChildren = new ArrayList<>();
+                newRootChildren.add(root.getPage().getPageNum());
+                newRootChildren.add(newChildPageNum);
+                
+                // 使用updateRoot方法更新根节点
+                updateRoot(new InnerNode(metadata, bufferManager, newRootKeys, newRootChildren, lockContext));
+            }
+        }
     }
+
 
     /**
      * Deletes a (key, rid) pair from a B+ tree.

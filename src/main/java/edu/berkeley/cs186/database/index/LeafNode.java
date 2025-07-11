@@ -215,8 +215,43 @@ class LeafNode extends BPlusNode {
     @Override
     public Optional<Pair<DataBox, Long>> bulkLoad(Iterator<Pair<DataBox, RecordId>> data,
             float fillFactor) {
-        // TODO(proj2): implement
-
+        // 计算目标填充数量：fillFactor * 2*d
+        int targetFill = (int) Math.ceil(fillFactor * 2 * metadata.getOrder());
+        
+        // 先填充当前节点到目标数量
+        while (data.hasNext() && keys.size() < targetFill) {
+            Pair<DataBox, RecordId> currentData = data.next();
+            keys.add(currentData.getFirst());
+            rids.add(currentData.getSecond());
+        }
+        
+        // 如果还有数据，说明需要创建右兄弟节点来处理剩余数据
+        if (data.hasNext()) {
+            // 获取下一个数据项来作为分裂key
+            Pair<DataBox, RecordId> nextEntry = data.next();
+            DataBox splitKey = nextEntry.getFirst();
+            
+            // 创建空的右兄弟节点，先添加这一个entry
+            List<DataBox> rightKeys = new ArrayList<>();
+            List<RecordId> rightRids = new ArrayList<>();
+            rightKeys.add(nextEntry.getFirst());
+            rightRids.add(nextEntry.getSecond());
+            
+            // 创建右兄弟节点
+            LeafNode rightNode = new LeafNode(metadata, bufferManager, rightKeys, rightRids, rightSibling, treeContext);
+            
+            // 更新当前节点的右兄弟指针
+            rightSibling = Optional.of(rightNode.getPage().getPageNum());
+            
+            // 同步当前节点
+            sync();
+            
+            // 返回分裂信息：使用第一个entry的key作为分裂key
+            return Optional.of(new Pair<>(splitKey, rightNode.getPage().getPageNum()));
+        }
+        
+        // 如果没有剩余数据，同步当前节点并返回空
+        sync();
         return Optional.empty();
     }
 
