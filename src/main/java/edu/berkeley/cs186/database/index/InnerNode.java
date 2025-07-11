@@ -129,7 +129,6 @@ class InnerNode extends BPlusNode {
         DataBox newKeyFromChild = splitResult.get().getFirst();
         long newChildPageNum = splitResult.get().getSecond();
 
-        
         // 插入分裂产生的新key到keys数组的位置i
         // 这个key将作为原子节点和新分裂节点之间的分界线
         keys.add(i, newKeyFromChild);
@@ -137,11 +136,11 @@ class InnerNode extends BPlusNode {
         // 插入新分裂出来的子节点到children数组的位置i+1
         // 因为children数组比keys数组多一个元素，新的子节点应该插在原子节点的右边
         children.add(i + 1, newChildPageNum);
-        sync();
         
         // 检查当前节点是否需要分裂
         if (keys.size() <= 2 * metadata.getOrder()) {
             // 当前节点没有溢出，不需要分裂
+            sync();
             return Optional.empty();
         }
         
@@ -187,7 +186,7 @@ class InnerNode extends BPlusNode {
         // TODO(proj2): implement
         assert(key != null);
 
-        long childPageNum = children.get(numLessThan(key, keys));
+        long childPageNum = children.get(numLessThanEqual(key, keys));
         BPlusNode childNode = BPlusNode.fromBytes(metadata, bufferManager, treeContext, childPageNum);
         childNode.remove(key);
 

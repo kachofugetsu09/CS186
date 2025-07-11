@@ -182,7 +182,7 @@ class LeafNode extends BPlusNode {
         // 检查是否需要分裂
         if (keys.size() <= 2 * metadata.getOrder()) {
             // 没有溢出，不需要分裂
-
+            sync();
             return Optional.empty();
         }
         

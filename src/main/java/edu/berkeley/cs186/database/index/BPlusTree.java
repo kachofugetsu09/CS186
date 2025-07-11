@@ -203,6 +203,10 @@ public class BPlusTree {
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
         // TODO(proj2): Return a BPlusTreeIterator.
+        LeafNode leftmostLeaf = root.getLeftmostLeaf();
+        if(leftmostLeaf != null && !leftmostLeaf.getKeys().isEmpty()){
+            return new BPlusTreeIterator(leftmostLeaf, 0);
+        }
 
         return Collections.emptyIterator();
     }
@@ -236,6 +240,27 @@ public class BPlusTree {
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
         // TODO(proj2): Return a BPlusTreeIterator.
+        LeafNode leafNode = root.get(key);
+        if(leafNode != null){
+            int index = leafNode.getKeys().size(); // 默认设为末尾，表示没找到
+            for(int i = 0; i < leafNode.getKeys().size(); i++){
+                if(leafNode.getKeys().get(i).compareTo(key) >= 0){
+                    index = i;
+                    break;
+                }
+            }
+            
+            // 如果在当前叶子节点中没找到 >= key 的值，需要移动到下一个叶子节点
+            if(index == leafNode.getKeys().size()) {
+                if(leafNode.getRightSibling().isPresent()) {
+                    return new BPlusTreeIterator(leafNode.getRightSibling().get(), 0);
+                } else {
+                    return Collections.emptyIterator();
+                }
+            }
+            
+            return new BPlusTreeIterator(leafNode, index);
+        }
 
         return Collections.emptyIterator();
     }
@@ -254,7 +279,7 @@ public class BPlusTree {
         // TODO(proj4_integration): Update the following line
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
-
+        
         Optional<Pair<DataBox, Long>> splitResult = root.put(key, rid);
         
         // 如果根节点分裂了，需要创建新的根节点
@@ -273,6 +298,7 @@ public class BPlusTree {
             // 使用updateRoot方法更新根节点
             updateRoot(new InnerNode(metadata, bufferManager, newRootKeys, newRootChildren, lockContext));
         }
+
     }
 
     /**
@@ -434,19 +460,48 @@ public class BPlusTree {
 
     // Iterator ////////////////////////////////////////////////////////////////
     private class BPlusTreeIterator implements Iterator<RecordId> {
-        // TODO(proj2): Add whatever fields and constructors you want here.
+        private LeafNode currentNode;
+        private int currentIndex;
+
+        // 构造函数：从指定的叶子节点和索引开始迭代
+        public BPlusTreeIterator(LeafNode startNode, int startIndex) {
+            this.currentNode = startNode;
+            this.currentIndex = startIndex;
+        }
 
         @Override
         public boolean hasNext() {
-            // TODO(proj2): implement
-
+            // 如果当前节点还有更多记录
+            if (currentNode != null && currentIndex < currentNode.getRids().size()) {
+                return true;
+            }
+            
+            // 如果当前节点没有更多记录，检查是否有右兄弟节点
+            if (currentNode != null && currentNode.getRightSibling().isPresent()) {
+                return true;
+            }
+            
             return false;
         }
 
         @Override
         public RecordId next() {
-            // TODO(proj2): implement
-
+            if (!hasNext()) {
+                throw new NoSuchElementException();
+            }
+            
+            // 如果当前节点还有记录，返回当前记录
+            if (currentIndex < currentNode.getRids().size()) {
+                return currentNode.getRids().get(currentIndex++);
+            }
+            
+            // 移动到右兄弟节点
+            if (currentNode.getRightSibling().isPresent()) {
+                currentNode = currentNode.getRightSibling().get();
+                currentIndex = 0;
+                return currentNode.getRids().get(currentIndex++);
+            }
+            
             throw new NoSuchElementException();
         }
     }
