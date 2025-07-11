@@ -377,7 +377,30 @@ class LeafNode extends BPlusNode {
         // use the constructor that reuses an existing page instead of fetching a
         // brand new one.
 
-        return null;
+        // private LeafNode(BPlusTreeMetadata metadata, BufferManager bufferManager, Page page,
+        //                     List<DataBox> keys,
+        //                     List<RecordId> rids, Optional<Long> rightSibling, LockContext treeContext)
+
+        Page page = bufferManager.fetchPage(treeContext, pageNum);
+        Buffer buf = page.getBuffer();
+        buf.get(); //isLeaf
+        long sibling = buf.getLong();
+        Optional<Long> rightSibling = sibling == -1L? Optional.empty() : Optional.of(sibling);
+        int n = buf.getInt();
+
+        List<DataBox> keys = new ArrayList<>();
+        List<RecordId> rids = new ArrayList<>();
+
+        for (int i = 0; i < n; ++i) {
+            keys.add(DataBox.fromBytes(buf, metadata.getKeySchema()));
+            rids.add(RecordId.fromBytes(buf));
+        }
+
+        LeafNode leafNode = new LeafNode(metadata,
+                bufferManager,page,
+                keys,rids,rightSibling, treeContext);
+
+        return leafNode;
     }
 
     // Builtins ////////////////////////////////////////////////////////////////
