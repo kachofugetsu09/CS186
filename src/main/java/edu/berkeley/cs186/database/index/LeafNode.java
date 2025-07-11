@@ -146,25 +146,69 @@ class LeafNode extends BPlusNode {
     // See BPlusNode.get.
     @Override
     public LeafNode get(DataBox key) {
-        // TODO(proj2): implement
-
-        return null;
+        // 对于叶子节点，无论查找什么key，都返回自己
+        // 因为叶子节点就是存储实际数据的地方
+        return this;
     }
 
     // See BPlusNode.getLeftmostLeaf.
     @Override
     public LeafNode getLeftmostLeaf() {
-        // TODO(proj2): implement
-
-        return null;
+        // 对于叶子节点，最左边的叶子就是自己
+        return this;
     }
 
     // See BPlusNode.put.
     @Override
     public Optional<Pair<DataBox, Long>> put(DataBox key, RecordId rid) {
-        // TODO(proj2): implement
-
-        return Optional.empty();
+        assert (key != null);
+        assert (rid != null);
+        
+        // 检查key是否已经存在
+        int existingIndex = keys.indexOf(key);
+        if (existingIndex != -1) {
+            throw new BPlusTreeException("Duplicate key: " + key);
+        }
+        
+        // 找到插入位置：第一个大于key的位置
+        int insertIndex = InnerNode.numLessThan(key, keys);
+        
+        // 插入新的(key, rid)对
+        keys.add(insertIndex, key);
+        rids.add(insertIndex, rid);
+        
+        // 同步到磁盘
+        sync();
+        
+        // 检查是否需要分裂
+        if (keys.size() <= 2 * metadata.getOrder()) {
+            // 没有溢出，不需要分裂
+            return Optional.empty();
+        }
+        
+        // 需要分裂，左节点保留前d个entry，右节点包含后d+1个entry
+        int d = metadata.getOrder();
+        
+        // 创建右节点的keys和rids
+        List<DataBox> rightKeys = new ArrayList<>(keys.subList(d, keys.size()));
+        List<RecordId> rightRids = new ArrayList<>(rids.subList(d, rids.size()));
+        
+        // 更新左节点（当前节点）的keys和rids
+        keys = new ArrayList<>(keys.subList(0, d));
+        rids = new ArrayList<>(rids.subList(0, d));
+        
+        // 创建新的右节点，右节点的rightSibling是当前节点的rightSibling
+        LeafNode rightNode = new LeafNode(metadata, bufferManager, rightKeys, rightRids, rightSibling, treeContext);
+        
+        // 更新当前节点的rightSibling指向新的右节点
+        rightSibling = Optional.of(rightNode.getPage().getPageNum());
+        
+        // 同步当前节点的更改
+        sync();
+        
+        // 返回分裂key（右节点的第一个key）和右节点的页号
+        DataBox splitKey = rightKeys.get(0);
+        return Optional.of(new Pair<>(splitKey, rightNode.getPage().getPageNum()));
     }
 
     // See BPlusNode.bulkLoad.
@@ -180,6 +224,16 @@ class LeafNode extends BPlusNode {
     @Override
     public void remove(DataBox key) {
         // TODO(proj2): implement
+        assert(key != null);
+
+        int existingIndex = keys.indexOf(key);
+        if (existingIndex == -1) {
+            throw new BPlusTreeException("Key not found: " + key);
+        }
+        keys.remove(existingIndex);
+        rids.remove(existingIndex);
+        sync();
+
 
         return;
     }

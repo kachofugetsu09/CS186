@@ -80,9 +80,20 @@ class InnerNode extends BPlusNode {
     // See BPlusNode.get.
     @Override
     public LeafNode get(DataBox key) {
-        // TODO(proj2): implement
+        assert (key != null);
 
-        return null;
+        
+        // 找到应该去哪个子节点查找
+        // 根据B+树的语义：key >= keys[i] 的数据应该去 children[i+1]
+        // 所以我们需要找到有多少个key <= 当前查找的key
+        int i = numLessThanEqual(key, keys);
+        
+        // 获取子节点
+        long childPageNum = children.get(i);
+        BPlusNode childNode = BPlusNode.fromBytes(metadata, bufferManager, treeContext, childPageNum);
+        
+        // 递归调用
+        return childNode.get(key);
     }
 
     // See BPlusNode.getLeftmostLeaf.
@@ -90,17 +101,76 @@ class InnerNode extends BPlusNode {
     public LeafNode getLeftmostLeaf() {
         assert(children.size() > 0);
         // TODO(proj2): implement
+        BPlusNode leftmostChild = getChild(0);
 
-        return null;
+
+        return leftmostChild.getLeftmostLeaf();
     }
 
     // See BPlusNode.put.
     @Override
     public Optional<Pair<DataBox, Long>> put(DataBox key, RecordId rid) {
-        // TODO(proj2): implement
+        assert (key != null);
+        
+        // 找到应该插入到哪个子节点
+        int i = numLessThanEqual(key, keys);
+        
+        // 递归插入到子节点
+        long childPageNum = children.get(i);
+        BPlusNode childNode = BPlusNode.fromBytes(metadata, bufferManager, treeContext, childPageNum);
+        Optional<Pair<DataBox, Long>> splitResult = childNode.put(key, rid);
+        
+        // 如果子节点没有分裂，则不需要更新当前节点
+        if (!splitResult.isPresent()) {
+            return Optional.empty();
+        }
+        
+        // 子节点分裂了，需要插入新的key和child pointer
+        DataBox newKeyFromChild = splitResult.get().getFirst();
+        long newChildPageNum = splitResult.get().getSecond();
 
-        return Optional.empty();
+        
+        // 插入分裂产生的新key到keys数组的位置i
+        // 这个key将作为原子节点和新分裂节点之间的分界线
+        keys.add(i, newKeyFromChild);
+        
+        // 插入新分裂出来的子节点到children数组的位置i+1
+        // 因为children数组比keys数组多一个元素，新的子节点应该插在原子节点的右边
+        children.add(i + 1, newChildPageNum);
+        sync();
+        
+        // 检查当前节点是否需要分裂
+        if (keys.size() <= 2 * metadata.getOrder()) {
+            // 当前节点没有溢出，不需要分裂
+            return Optional.empty();
+        }
+        
+        // 当前节点溢出，需要分裂
+        // 对于内部节点：前d个key留在左节点，后d个key移到右节点，中间的key上升
+        int d = metadata.getOrder();
+        
+        // 中间的key将被推到父节点
+        DataBox splitKey = keys.get(d);
+        
+        // 创建右节点的keys和children
+        List<DataBox> rightKeys = new ArrayList<>(keys.subList(d + 1, keys.size()));
+        List<Long> rightChildren = new ArrayList<>(children.subList(d + 1, children.size()));
+        
+        // 更新左节点（当前节点）的keys和children
+        keys = new ArrayList<>(keys.subList(0, d));
+        children = new ArrayList<>(children.subList(0, d + 1));
+        
+        // 创建新的右节点
+        InnerNode rightNode = new InnerNode(metadata, bufferManager, rightKeys, rightChildren, treeContext);
+        
+        sync();
+        
+        // 返回分裂key和右节点的页号
+        return Optional.of(new Pair<>(splitKey, rightNode.getPage().getPageNum()));
     }
+
+
+
 
     // See BPlusNode.bulkLoad.
     @Override
@@ -115,6 +185,13 @@ class InnerNode extends BPlusNode {
     @Override
     public void remove(DataBox key) {
         // TODO(proj2): implement
+        assert(key != null);
+
+        long childPageNum = children.get(numLessThan(key, keys));
+        BPlusNode childNode = BPlusNode.fromBytes(metadata, bufferManager, treeContext, childPageNum);
+        childNode.remove(key);
+
+        sync();
 
         return;
     }
