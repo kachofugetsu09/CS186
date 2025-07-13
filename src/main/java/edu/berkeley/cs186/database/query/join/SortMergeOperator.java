@@ -135,12 +135,71 @@ public class SortMergeOperator extends JoinOperator {
         }
 
         /**
-         * Returns the next record that should be yielded from this join,
-         * or null if there are no more records to join.
+         * Sort-Merge Join核心算法：返回下一个匹配的记录组合
+         * 算法原理：双指针遍历两个已排序的表，生成所有键值相等的记录组合
          */
         private Record fetchNextRecord() {
-            // TODO(proj3_part1): implement
-            return null;
+            if (leftRecord == null || rightRecord == null) {
+                return null;
+            }
+
+            while (true) {
+                int cmp = compare(leftRecord, rightRecord);
+                
+                if (cmp == 0) {
+                    // 键值匹配：生成连接结果
+                    if (!marked) {
+                        // 首次匹配时标记右表位置，用于后续回溯
+                        rightIterator.markPrev();
+                        marked = true;
+                    }
+                    
+                    Record result = leftRecord.concat(rightRecord);
+                    
+                    // 右表前进，继续寻找更多匹配
+                    if (rightIterator.hasNext()) {
+                        rightRecord = rightIterator.next();
+                    } else {
+                        // 右表遍历完，左表前进并重置右表到标记位置
+                        // 这样新的左记录可以与所有匹配的右记录组合
+                        if (leftIterator.hasNext()) {
+                            leftRecord = leftIterator.next();
+                            rightIterator.reset();
+                            rightRecord = rightIterator.hasNext() ? rightIterator.next() : null;
+                        } else {
+                            leftRecord = null;
+                        }
+                    }
+                    
+                    return result;
+                    
+                } else if (cmp < 0) {
+                    // 左值 < 右值：左表前进
+                    if (leftIterator.hasNext()) {
+                        leftRecord = leftIterator.next();
+                        if (marked) {
+                            // 重置右表到标记位置，让新左记录从头匹配
+                            // 例如：左表[1,1,2] 右表[1,1,2] 
+                            // 当左表第2个1来到时，右表已前进到2
+                            // 必须重置让第2个1与右表的1匹配，避免丢失组合
+                            rightIterator.reset();
+                            rightRecord = rightIterator.hasNext() ? rightIterator.next() : null;
+                            marked = false;
+                        }
+                    } else {
+                        return null;
+                    }
+                    
+                } else {
+                    // 左值 > 右值：右表前进
+                    if (rightIterator.hasNext()) {
+                        rightRecord = rightIterator.next();
+                    } else {
+                        return null;
+                    }
+                    marked = false; // 清除标记，因为跳过了匹配区域
+                }
+            }
         }
 
         @Override
