@@ -87,7 +87,20 @@ public class SortOperator extends QueryOperator {
      */
     public Run sortRun(Iterator<Record> records) {
         // TODO(proj3_part1): implement
-        return null;
+        Run run = makeRun();
+        List<Record> recordList = new ArrayList<>();
+        while(records.hasNext()){
+            Record record = records.next();
+            if (record == null) {
+                continue; // Skip null records
+            }
+            recordList.add(record);
+
+        }
+        recordList.sort(comparator);
+        run.addAll(recordList);
+        return run;
+
     }
 
     /**
@@ -108,7 +121,44 @@ public class SortOperator extends QueryOperator {
     public Run mergeSortedRuns(List<Run> runs) {
         assert (runs.size() <= this.numBuffers - 1);
         // TODO(proj3_part1): implement
-        return null;
+
+        Run result = makeRun();
+
+        PriorityQueue<Pair<Record,Integer>> pq = new PriorityQueue<>(runs.size(), new RecordPairComparator());
+
+        List<BacktrackingIterator<Record>> iterators = new ArrayList<>();
+        for(int i = 0; i < runs.size(); i++) {
+            // 为第i个Run创建迭代器
+            BacktrackingIterator<Record> it = runs.get(i).iterator();
+            iterators.add(it);
+            
+            // 如果这个Run不为空，就取出第一个记录，连同Run的索引一起放入优先队列
+            if (it.hasNext()) {
+                Record record = it.next();
+                pq.add(new Pair<>(record, i));
+            }
+        }
+        
+        // 第二步：不断从优先队列中取出最小的记录，直到所有记录都被处理完
+        while(!pq.isEmpty()){
+            // 从优先队列中取出当前最小的记录及其来源Run的索引
+            Pair<Record, Integer> pair = pq.poll();
+            Record record = pair.getFirst();    // 取出记录
+            int runIndex = pair.getSecond();    // 取出该记录来自第几个Run
+            
+            // 将这个最小记录添加到结果中
+            result.add(record);
+
+            //因为我们取出了这个run中的记录，堆里面这个run的位置需要这个run的后继者来补充
+            //所以我们需要检查这个Run的迭代器是否还有下一个记录，如果有就放进去
+            BacktrackingIterator<Record> iterator = iterators.get(runIndex);
+            if (iterator.hasNext()) {
+                Record nextRecord = iterator.next();
+                pq.add(new Pair<>(nextRecord, runIndex));
+            }
+        }
+        
+        return result;
     }
 
     /**
@@ -133,7 +183,13 @@ public class SortOperator extends QueryOperator {
      */
     public List<Run> mergePass(List<Run> runs) {
         // TODO(proj3_part1): implement
-        return Collections.emptyList();
+        List<Run> result = new ArrayList<>();
+        for(int i = 0; i < runs.size(); i += this.numBuffers - 1) {
+            List<Run> batch = runs.subList(i, Math.min(i + this.numBuffers - 1, runs.size()));
+            Run mergedRun = mergeSortedRuns(batch);
+            result.add(mergedRun);
+        }
+        return result;
     }
 
     /**
@@ -148,8 +204,21 @@ public class SortOperator extends QueryOperator {
         // Iterator over the records of the relation we want to sort
         Iterator<Record> sourceIterator = getSource().iterator();
 
-        // TODO(proj3_part1): implement
-        return makeRun(); // TODO(proj3_part1): replace this!
+        //PASS 0 - 创建初始的已排序runs
+        List<Run> runs = new ArrayList<>();
+        while(sourceIterator.hasNext()){
+            // Pass 0阶段可以使用所有buffer来排序
+            BacktrackingIterator<Record> blockIterator = getBlockIterator(sourceIterator, getSchema(), this.numBuffers);
+            Run sortedRun = sortRun(blockIterator);
+            runs.add(sortedRun);
+        }
+
+        // 后续轮次 - 不断合并直到只剩1个run
+        while(runs.size() > 1){
+            runs = mergePass(runs);  //更新排序过后的自己
+        }
+
+        return runs.get(0);
     }
 
     /**
