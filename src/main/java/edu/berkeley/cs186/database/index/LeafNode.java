@@ -258,7 +258,6 @@ class LeafNode extends BPlusNode {
     // See BPlusNode.remove.
     @Override
     public void remove(DataBox key) {
-        // TODO(proj2): implement
         assert(key != null);
 
         int existingIndex = keys.indexOf(key);
@@ -461,15 +460,6 @@ class LeafNode extends BPlusNode {
      */
     public static LeafNode fromBytes(BPlusTreeMetadata metadata, BufferManager bufferManager,
                                      LockContext treeContext, long pageNum) {
-        // TODO(proj2): implement
-        // Note: LeafNode has two constructors. To implement fromBytes be sure to
-        // use the constructor that reuses an existing page instead of fetching a
-        // brand new one.
-
-        // private LeafNode(BPlusTreeMetadata metadata, BufferManager bufferManager, Page page,
-        //                     List<DataBox> keys,
-        //                     List<RecordId> rids, Optional<Long> rightSibling, LockContext treeContext)
-
         Page page = bufferManager.fetchPage(treeContext, pageNum);
         Buffer buf = page.getBuffer();
         buf.get(); //isLeaf

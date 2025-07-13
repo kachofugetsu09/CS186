@@ -47,7 +47,7 @@ public abstract class QueryOperator implements Iterable<Record> {
      * Creates a QueryOperator with a set source, and computes the output schema
      * accordingly.
      * @param type the operator's type (Join, Project, Select, etc...)
-     * @param source the source operator
+     * @param source the source operatorF
      */
     protected QueryOperator(OperatorType type, QueryOperator source) {
         this.source = source;

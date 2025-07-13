@@ -87,7 +87,22 @@ public class BNLJOperator extends JoinOperator {
          * Make sure you pass in the correct schema to this method.
          */
         private void fetchNextLeftBlock() {
-            // TODO(proj3_part1): implement
+            if(!this.leftSourceIterator.hasNext()){
+                this.leftBlockIterator = null;
+                this.leftRecord = null;
+                return;
+            }
+            this.leftBlockIterator = QueryOperator.getBlockIterator(
+                    this.leftSourceIterator, getLeftSource().getSchema(), numBuffers-2
+            );
+
+            if(this.leftBlockIterator.hasNext()){
+                // 当处理下一个右页时，重置回到左块开始，重新扫描整个左块
+                this.leftBlockIterator.markNext();
+                this.leftRecord = this.leftBlockIterator.next();
+            } else {
+                this.leftRecord = null;
+            }
         }
 
         /**
@@ -102,20 +117,77 @@ public class BNLJOperator extends JoinOperator {
          * Make sure you pass in the correct schema to this method.
          */
         private void fetchNextRightPage() {
-            // TODO(proj3_part1): implement
+            if(!this.rightSourceIterator.hasNext()){
+                return;
+            }
+            this.rightPageIterator = QueryOperator.getBlockIterator(
+                    this.rightSourceIterator, getRightSource().getSchema(), 1
+            );
+            
+            // 标记右页的起始位置，以便重置，在同一个左块内，处理不同的左记录时需要重新扫描当前右页
+            if(this.rightPageIterator != null) {
+                this.rightPageIterator.markNext();
+            }
         }
 
         /**
          * Returns the next record that should be yielded from this join,
          * or null if there are no more records to join.
          *
-         * You may find JoinOperator#compare useful here. (You can call compare
-         * function directly from this file, since BNLJOperator is a subclass
-         * of JoinOperator).
+         * ppt中的讲解：
+         * for each rpage in R:
+         *      for each spage in S:
+         *          for each rtuple in rpage:
+         *              for each stuple in spage:
+         *                  if join_condition(rtuple, stuple):
+         *                      add <rtuple, stuple> to result buffer
          */
         private Record fetchNextRecord() {
-            // TODO(proj3_part1): implement
-            return null;
+            while(true) {
+                // Case 1: 右侧页面迭代器有一个值要生成
+                if(this.rightPageIterator != null && this.rightPageIterator.hasNext()){
+                    Record rightRecord = this.rightPageIterator.next();
+                    if(this.leftRecord != null && compare(this.leftRecord, rightRecord) == 0){
+                        return this.leftRecord.concat(rightRecord);
+                    }
+                }
+
+                // Case 2:右侧页面迭代器没有值可以生成，但左侧块迭代器有
+                else if(this.leftBlockIterator != null && this.leftBlockIterator.hasNext()){
+                    this.leftRecord = this.leftBlockIterator.next();
+                    //因为左块迭代器做了移动，每一个迭代器的行为应该是匹配右侧每一个值，所以这里要重置右迭代器。
+                    if(this.rightPageIterator != null) {
+                        this.rightPageIterator.reset();
+                    }
+                }
+                // Case 3: 右侧页面和左侧块迭代器都没有值可以生成，但右侧页面还有更多
+                else {
+                    //首先获取下一个右侧页面
+                    this.fetchNextRightPage();
+                    if(this.rightPageIterator != null && this.rightPageIterator.hasNext()){
+                        // 重置左块到开始位置，重新扫描左块
+                        if(this.leftBlockIterator != null) {
+                            this.leftBlockIterator.reset();
+                            if(this.leftBlockIterator.hasNext()) {
+                                this.leftRecord = this.leftBlockIterator.next();
+                            } else {
+                                this.leftRecord = null;
+                            }
+                        }
+                    }
+                    // Case 4: 右页和左块迭代器都没有值，也没有更多的右页，但仍有左块
+                    else {
+                        //获取新的左块
+                        this.fetchNextLeftBlock();
+                        if(this.leftBlockIterator == null || !this.leftBlockIterator.hasNext()){
+                            return null;
+                        }
+                        // 重置右表到开始位置，重新做某一个左块对一整个右表的匹配
+                        this.rightSourceIterator.reset();
+                        this.fetchNextRightPage();
+                    }
+                }
+            }
         }
 
         /**

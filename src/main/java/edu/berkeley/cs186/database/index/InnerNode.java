@@ -82,10 +82,7 @@ class InnerNode extends BPlusNode {
     public LeafNode get(DataBox key) {
         assert (key != null);
 
-        
-        // 找到应该去哪个子节点查找
-        // 根据B+树的语义：key >= keys[i] 的数据应该去 children[i+1]
-        // 所以我们需要找到有多少个key <= 当前查找的key
+
         int i = numLessThanEqual(key, keys);
         
         // 获取子节点
@@ -99,8 +96,7 @@ class InnerNode extends BPlusNode {
     // See BPlusNode.getLeftmostLeaf.
     @Override
     public LeafNode getLeftmostLeaf() {
-        assert(children.size() > 0);
-        // TODO(proj2): implement
+        assert(!children.isEmpty());
         BPlusNode leftmostChild = getChild(0);
 
 

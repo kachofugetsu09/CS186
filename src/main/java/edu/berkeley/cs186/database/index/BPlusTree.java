@@ -481,7 +481,6 @@ public class BPlusTree {
         private LeafNode currentNode;
         private int currentIndex;
 
-        // 构造函数：从指定的叶子节点和索引开始迭代
         public BPlusTreeIterator(LeafNode startNode, int startIndex) {
             this.currentNode = startNode;
             this.currentIndex = startIndex;
