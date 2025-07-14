@@ -761,7 +761,53 @@ public class QueryPlan {
         // Set the final operator to the lowest cost operator from the last
         // pass, add group by, project, sort and limit operators, and return an
         // iterator over the final operator.
-        return this.executeNaive(); // TODO(proj3_part2): Replace this!
+
+        // Pass 1: 为每个表找到最优的单表访问方式
+        Map<Set<String>, QueryOperator> pass1Map = new HashMap<>();
+        for(String table : this.tableNames){
+            QueryOperator lowCostOperator = minCostSingleAccess(table);
+            pass1Map.put(Collections.singleton(table), lowCostOperator);
+        }
+        
+        // 保存所有轮次的最优计划
+        Map<Set<String>, QueryOperator> allPlans = new HashMap<>(pass1Map);
+        
+        // Pass n
+        for(int pass = 1; pass < this.tableNames.size(); pass++){
+            // 筛选出大小为 pass 的表集合作为上一轮的结果
+            Map<Set<String>, QueryOperator> prevPassResults = new HashMap<>();
+            for(Set<String> tableSet : allPlans.keySet()){
+                if(tableSet.size() == pass){
+                    prevPassResults.put(tableSet, allPlans.get(tableSet));
+                }
+            }
+            
+            // 如果没有找到上一轮的结果，跳出循环
+            if(prevPassResults.isEmpty()){
+                break;
+            }
+
+            // 使用 minCostJoins 找到当前轮的最优连接
+            Map<Set<String>, QueryOperator> currentPassResults =
+                    minCostJoins(prevPassResults, pass1Map);
+
+            // 将当前轮结果加入总计划
+            allPlans.putAll(currentPassResults);
+        }
+        
+        // 找到包含所有表的最优计划
+        Set<String> allTables = new HashSet<>(this.tableNames);
+        finalOperator = allPlans.get(allTables);
+        
+
+        
+        // 添加其他操作符
+        addGroupBy();
+        addProject();
+        addSort();
+        addLimit();
+        
+        return finalOperator.iterator();
     }
 
     // EXECUTE NAIVE ///////////////////////////////////////////////////////////
