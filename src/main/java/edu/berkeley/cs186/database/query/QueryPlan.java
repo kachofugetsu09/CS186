@@ -662,6 +662,56 @@ public class QueryPlan {
         //      calculate the cheapest join with the new table (the one you
         //      fetched an operator for from pass1Map) and the previously joined
         //      tables. Then, update the result map if needed.
+        for(Set<String> tables : prevMap.keySet()){
+            for(JoinPredicate jp : joinPredicates){
+                String leftTableName = jp.leftTable;
+                String leftColumnName = jp.leftColumn;
+                String rightTableName = jp.rightTable;
+                String rightColumnName = jp.rightColumn;
+                
+                Set<String> newTableSet = null;
+                QueryOperator joinOp = null;
+
+                if(tables.contains(leftTableName) && !tables.contains(rightTableName)){
+                    // Case 1: 现有表集合包含左表，需要加入右表
+                    Set<String> rightTableSet = Collections.singleton(rightTableName);
+                    QueryOperator operator = pass1Map.get(rightTableSet);
+                    if(operator != null) {
+                        joinOp = minCostJoinType(prevMap.get(tables),operator,
+                                leftColumnName, rightColumnName);
+                        newTableSet = new HashSet<>(tables);
+                        newTableSet.add(rightTableName);
+                    }
+                }
+                else if(!tables.contains(leftTableName) && tables.contains(rightTableName)){
+                    // Case 2: 现有表集合包含右表，需要加入左表
+                    Set<String> leftTableSet = Collections.singleton(leftTableName);
+                    QueryOperator operator = pass1Map.get(leftTableSet);
+                    if(operator != null) {
+                        joinOp = minCostJoinType(prevMap.get(tables),operator,
+                                rightColumnName, leftColumnName);
+                        newTableSet = new HashSet<>(tables);
+                        newTableSet.add(leftTableName);
+                    }
+                }
+                else{
+                    continue;
+                }
+                
+                // 更新result
+                if(joinOp != null) {
+                    if(!result.containsKey(newTableSet)){
+                        result.put(newTableSet, joinOp);
+                    }
+                    else{
+                        QueryOperator existingOp = result.get(newTableSet);
+                        if(joinOp.estimateIOCost() < existingOp.estimateIOCost()){
+                            result.put(newTableSet, joinOp);
+                        }
+                    }
+                }
+            }
+        }
         return result;
     }
 
