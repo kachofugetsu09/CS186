@@ -21,9 +21,25 @@ public enum LockType {
         if (a == null || b == null) {
             throw new NullPointerException("null lock type");
         }
-        // TODO(proj4_part1): implement
 
-        return false;
+        // TODO(proj4_part1): implement
+        switch (b){
+            case S:
+                return a== S|| a == IS|| a == NL;
+            case X:
+                return a==NL;
+            case IS:
+                return a== S|| a == IS||a ==IX|| a == SIX|| a == NL;
+            case IX:
+                return a == IS || a == IX || a == NL;
+            case SIX:
+                return a == LockType.IS|| a == NL;
+            case NL:
+                return true;
+            default:
+                return false;
+        }
+
     }
 
     /**
@@ -54,6 +70,19 @@ public enum LockType {
             throw new NullPointerException("null lock type");
         }
         // TODO(proj4_part1): implement
+        switch (parentLockType){
+            case NL:
+            case S:
+                return childLockType == NL;
+            case IS:
+                return childLockType.equals(LockType.IS)||
+                        childLockType.equals(LockType.S)||
+                        childLockType.equals(LockType.NL);
+            case IX:
+            case SIX:
+            case X:
+                return true;
+        }
 
         return false;
     }
@@ -70,6 +99,23 @@ public enum LockType {
         }
         // TODO(proj4_part1): implement
 
+        switch (substitute) {
+            case NL:
+                return required == NL;
+            case IS:
+                return required == IS || required == NL;
+            case IX:
+                return required == LockType.IX || required == LockType.IS || required == LockType.NL;
+            case S:
+                return required != X && required != IX && required != SIX&& required != IS;
+            case SIX:
+                return required == LockType.NL || required == LockType.IS ||
+                        required == LockType.IX || required == LockType.S ||
+                        required == LockType.SIX;
+            case X:
+                return true;
+
+        }
         return false;
     }
 
