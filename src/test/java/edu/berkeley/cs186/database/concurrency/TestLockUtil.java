@@ -3,6 +3,7 @@ package edu.berkeley.cs186.database.concurrency;
 import edu.berkeley.cs186.database.TransactionContext;
 import edu.berkeley.cs186.database.TimeoutScaling;
 import edu.berkeley.cs186.database.categories.*;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -50,6 +51,15 @@ public class TestLockUtil {
             pageContexts[i] = tableContext.childContext((long) i);
         }
         TransactionContext.setTransaction(transaction);
+    }
+
+    @After
+    public void tearDown() {
+        // 清理事务状态，防止测试之间相互影响
+        // 不实现这个方法测试过不了，虽然单个测试都能过
+        if (TransactionContext.getTransaction() != null) {
+            TransactionContext.unsetTransaction();
+        }
     }
 
     @Test

@@ -270,14 +270,14 @@ public class LockContext {
             throw new UnsupportedOperationException("Read only locks are not supported");
         }
         long transNum = transaction.getTransNum();
-        if (lockman.getLockType(transaction, name).equals(LockType.NL)) {
+        LockType currentLockType = lockman.getLockType(transaction, name);
+        if (currentLockType.equals(LockType.NL)) {
             throw new NoLockHeldException("Transaction " + transNum + " does not hold a lock on " + name);
         }
 
         List<ResourceName> descendantLocks = getAllDescendantLocks(transaction);
 
         // 决定新锁类型
-        LockType currentLockType = lockman.getLockType(transaction, name);
         LockType newLockType;
         
         if (descendantLocks.isEmpty()) {
@@ -287,13 +287,15 @@ public class LockContext {
             } else if (currentLockType == LockType.IX) {
                 newLockType = LockType.X;
             } else {
+                // 如果当前是 S 或 X 锁，不需要升级
                 return;
             }
         } else {
             // 如果有后代锁，检查是否需要 X 锁
             boolean needX = false;
             for(ResourceName childLock : descendantLocks){
-                if(lockman.getLockType(transaction, childLock).equals(LockType.X)) {
+                LockType childLockType = lockman.getLockType(transaction, childLock);
+                if(childLockType.equals(LockType.X) || childLockType.equals(LockType.IX) || childLockType.equals(LockType.SIX)) {
                     needX = true;
                     break;
                 }
@@ -301,12 +303,33 @@ public class LockContext {
             newLockType = needX ? LockType.X : LockType.S;
         }
 
+        // 如果新锁类型和当前锁类型相同，不需要做任何改变
+        if (currentLockType.equals(newLockType)) {
+            return;
+        }
+
         // 创建要释放的锁列表，包括当前锁和所有后代锁
         List<ResourceName> locksToRelease = new ArrayList<>(descendantLocks);
-        locksToRelease.add(name);
+        locksToRelease.add(name);  // 包含当前锁，以便进行替换
 
         lockman.acquireAndRelease(transaction, name, newLockType, locksToRelease);
 
+        // 清理子锁计数：需要遍历所有被释放的后代锁，并更新它们的父上下文
+        for (ResourceName descendantName : descendantLocks) {
+            LockContext descendantContext = LockContext.fromResourceName(lockman, descendantName);
+            LockContext descendantParent = descendantContext.parentContext();
+            
+            // 从父上下文中减去这个子锁
+            while (descendantParent != null && !descendantParent.name.equals(name)) {
+                int currentCount = descendantParent.numChildLocks.getOrDefault(transNum, 0);
+                if (currentCount > 0) {
+                    descendantParent.numChildLocks.put(transNum, currentCount - 1);
+                }
+                descendantParent = descendantParent.parentContext();
+            }
+        }
+        
+        // 重置当前上下文的子锁计数（因为所有后代锁都被释放了）
         numChildLocks.put(transNum, 0);
 
     }

@@ -249,19 +249,21 @@ public class LockManager {
                 Lock newLock = new Lock(name, lockType, transNum);
                 entry.grantOrUpdateLock(newLock);
 
-                // 释放所有指定的锁
+                // 释放所有指定的锁（除了当前资源，因为grantOrUpdateLock已经处理了替换）
                 for (ResourceName releaseName : releaseNames) {
-                    ResourceEntry releaseEntry = getResourceEntry(releaseName);
-                    // 找到要释放的锁
-                    Lock lockToRelease = null;
-                    for (Lock lock : releaseEntry.locks) {
-                        if (lock.transactionNum == transNum) {
-                            lockToRelease = lock;
-                            break;
+                    if (!releaseName.equals(name)) {  // 跳过当前资源
+                        ResourceEntry releaseEntry = getResourceEntry(releaseName);
+                        // 找到要释放的锁
+                        Lock lockToRelease = null;
+                        for (Lock lock : releaseEntry.locks) {
+                            if (lock.transactionNum == transNum) {
+                                lockToRelease = lock;
+                                break;
+                            }
                         }
-                    }
-                    if (lockToRelease != null) {
-                        releaseEntry.releaseLock(lockToRelease);
+                        if (lockToRelease != null) {
+                            releaseEntry.releaseLock(lockToRelease);
+                        }
                     }
                 }
             }
@@ -298,7 +300,7 @@ public class LockManager {
             LockType currentLock= resourceEntry.getTransactionLockType(transNum);
             if(currentLock != LockType.NL){
                 throw new DuplicateLockRequestException("Transaction " + transNum +
-                        " already holds a lock on " + name + " of type " + LockType.NL);
+                        " already holds a lock on " + name + " of type " + currentLock);
             }
             if(!resourceEntry.checkCompatible(lockType, transNum)||
                     !resourceEntry.waitingQueue.isEmpty()){
