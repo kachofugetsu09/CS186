@@ -215,16 +215,15 @@ public class LockContext {
         // 如果升级到 SIX，需要释放所有 S/IS 后代锁
         if (newLockType == LockType.SIX && (currentLockType == LockType.IS || currentLockType == LockType.IX)) {
             List<ResourceName> descendants = sisDescendants(transaction);
-            if (!descendants.isEmpty()) {
-                lockman.acquireAndRelease(transaction, name, newLockType, descendants);
+            // 创建要释放的锁列表，包括当前锁和所有 S/IS 后代锁
+            List<ResourceName> locksToRelease = new ArrayList<>(descendants);
+            locksToRelease.add(name);
+            
+            lockman.acquireAndRelease(transaction, name, newLockType, locksToRelease);
 
-                int releasedCount = descendants.size();
-                int currentCount = numChildLocks.getOrDefault(transNum, 0);
-                numChildLocks.put(transNum, Math.max(0, currentCount - releasedCount));
-            } else {
-                // 没有后代锁，直接升级
-                lockman.promote(transaction, name, newLockType);
-            }
+            int releasedCount = descendants.size();
+            int currentCount = numChildLocks.getOrDefault(transNum, 0);
+            numChildLocks.put(transNum, Math.max(0, currentCount - releasedCount));
         } else {
             // 普通升级，不需要释放后代锁
             lockman.promote(transaction, name, newLockType);
@@ -302,7 +301,11 @@ public class LockContext {
             newLockType = needX ? LockType.X : LockType.S;
         }
 
-        lockman.acquireAndRelease(transaction, name, newLockType, descendantLocks);
+        // 创建要释放的锁列表，包括当前锁和所有后代锁
+        List<ResourceName> locksToRelease = new ArrayList<>(descendantLocks);
+        locksToRelease.add(name);
+
+        lockman.acquireAndRelease(transaction, name, newLockType, locksToRelease);
 
         numChildLocks.put(transNum, 0);
 
