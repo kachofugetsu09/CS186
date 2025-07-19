@@ -93,7 +93,25 @@ public class ARIESRecoveryManager implements RecoveryManager {
     @Override
     public long commit(long transNum) {
         // TODO(proj5): implement
-        return -1L;
+        TransactionTableEntry transactionEntry = transactionTable.get(transNum);
+        if (transactionEntry == null) {
+            throw new IllegalArgumentException("Transaction " + transNum + " not found.");
+        }
+
+        long prevLSN = transactionEntry.lastLSN;
+
+        LogRecord commitRecord = new CommitTransactionLogRecord(transNum, prevLSN);
+        long commitLSN = logManager.appendToLog(commitRecord);
+
+        flushToLSN(commitLSN);
+
+        // Update transaction table entry
+        transactionEntry.lastLSN = commitLSN;
+        Transaction transaction = transactionEntry.transaction;
+        transaction.setStatus(Transaction.Status.COMMITTING);
+
+
+        return commitLSN;
     }
 
     /**
@@ -109,7 +127,19 @@ public class ARIESRecoveryManager implements RecoveryManager {
     @Override
     public long abort(long transNum) {
         // TODO(proj5): implement
-        return -1L;
+        TransactionTableEntry transactionEntry = transactionTable.get(transNum);
+        if (transactionEntry == null) {
+            throw new IllegalArgumentException("Transaction " + transNum + " not found.");
+        }
+
+        long prevLSN = transactionEntry.lastLSN;
+        LogRecord abortRecord = new AbortTransactionLogRecord(transNum, prevLSN);
+        long abortLSN = logManager.appendToLog(abortRecord);
+
+        transactionEntry.lastLSN = abortLSN;
+        Transaction transaction = transactionEntry.transaction;
+        transaction.setStatus(Transaction.Status.ABORTING);
+        return abortLSN;
     }
 
     /**
@@ -127,7 +157,24 @@ public class ARIESRecoveryManager implements RecoveryManager {
     @Override
     public long end(long transNum) {
         // TODO(proj5): implement
-        return -1L;
+
+        TransactionTableEntry transactionEntry = transactionTable.get(transNum);
+        if (transactionEntry == null) {
+            throw new IllegalArgumentException("Transaction " + transNum + " not found.");
+        }
+        Transaction transaction = transactionEntry.transaction;
+        if (transaction.getStatus() == Transaction.Status.ABORTING) {
+            rollbackToLSN(transNum, 0);
+        }
+
+        EndTransactionLogRecord endRecord = new EndTransactionLogRecord(transNum, transactionEntry.lastLSN);
+        long endLSN = logManager.appendToLog(endRecord);
+        transaction.cleanup();
+        transaction.setStatus(Transaction.Status.COMPLETE);
+
+
+        transactionTable.remove(transNum);
+        return endLSN;
     }
 
     /**
@@ -155,6 +202,28 @@ public class ARIESRecoveryManager implements RecoveryManager {
         // back from the next record that hasn't yet been undone.
         long currentLSN = lastRecord.getUndoNextLSN().orElse(lastRecordLSN);
         // TODO(proj5) implement the rollback logic described above
+
+        while(currentLSN > LSN){
+            LogRecord logRecord = logManager.fetchLogRecord(currentLSN);
+            if(logRecord.isUndoable()){
+                // Get the compensation log record (CLR)
+                LogRecord clr = logRecord.undo(transactionEntry.lastLSN);
+                // Append the CLR to the log
+                long clrLSN = logManager.appendToLog(clr);
+
+                // Call redo on the CLR to perform the undo
+                clr.redo(this, diskSpaceManager, bufferManager);
+
+                // Update the lastLSN of the transaction
+                transactionEntry.lastLSN = clrLSN;
+                // Update the currentLSN to the next record to undo
+                currentLSN = logRecord.getPrevLSN().orElse(0L);
+            }
+            else{
+                // If the record is not undoable, we can just move to the previous record
+                currentLSN = logRecord.getPrevLSN().orElse(0L);
+            }
+        }
     }
 
     /**
