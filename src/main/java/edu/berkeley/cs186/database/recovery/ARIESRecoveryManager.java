@@ -859,6 +859,46 @@ public class ARIESRecoveryManager implements RecoveryManager {
      */
     void restartUndo() {
         // TODO(proj5): implement
+        //First, a priority queue is created sorted on lastLSN of all aborting transactions.
+        PriorityQueue<Pair<Long, TransactionTableEntry>> undoQueue = new PriorityQueue<>(
+                new PairFirstReverseComparator<>());
+        for (TransactionTableEntry entry : transactionTable.values()) {
+            if (entry.transaction.getStatus() == Transaction.Status.RECOVERY_ABORTING) {
+                undoQueue.add(new Pair<>(entry.lastLSN, entry));
+            }
+        }
+        // Then, always working on the largest LSN in the priority queue until we are done,
+        while(!undoQueue.isEmpty()){
+            Pair<Long, TransactionTableEntry> pair = undoQueue.poll();
+            long currentLSN = pair.getFirst();
+            TransactionTableEntry entry = pair.getSecond();
+            LogRecord record = logManager.fetchLogRecord(currentLSN);
+            
+            if(record.isUndoable()){
+                //如果记录可撤销，我们写出 CLR 并撤销它.创建 CLR 时，prevLSN 应该是事务当前的 lastLSN
+                LogRecord clr = record.undo(entry.lastLSN);
+                long clrLSN = logManager.appendToLog(clr);
+                
+                // 立即更新事务表中的 lastLSN
+                entry.lastLSN = clrLSN;
+                
+                // 执行 undo 操作
+                clr.redo(this, diskSpaceManager, bufferManager);
+            }
+            
+            //如果记录有 undoNextLSN，就用它的 undoNextLSN 替换集合中的 LSN；否则用 prevLSN 替换。
+            long nextLSN = record.getUndoNextLSN().orElse(record.getPrevLSN().orElse(0L));
+            //如果前一步的 LSN 为 0，则结束事务，将其从集合和事务表中移除。
+            if(nextLSN == 0){
+                // 则结束事务，将其从集合和事务表中移除。
+                entry.transaction.cleanup();
+                entry.transaction.setStatus(Transaction.Status.COMPLETE);
+                long endLSN = logManager.appendToLog(new EndTransactionLogRecord(entry.transaction.getTransNum(), entry.lastLSN));
+                transactionTable.remove(entry.transaction.getTransNum());
+            } else {
+                undoQueue.add(new Pair<>(nextLSN, entry));
+            }
+        }
         return;
     }
 
