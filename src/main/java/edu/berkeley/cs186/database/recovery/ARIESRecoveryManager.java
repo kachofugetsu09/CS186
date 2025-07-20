@@ -463,9 +463,6 @@ public class ARIESRecoveryManager implements RecoveryManager {
 
         // TODO(proj5): implement
 
-        if (savepointLSN == -1) {
-            throw new IllegalArgumentException("Savepoint " + name + " not found for transaction " + transNum);
-        }
 
         rollbackToLSN(transNum, savepointLSN);
 
@@ -492,10 +489,50 @@ public class ARIESRecoveryManager implements RecoveryManager {
         LogRecord beginRecord = new BeginCheckpointLogRecord();
         long beginLSN = logManager.appendToLog(beginRecord);
 
+        //记录哪些页面是脏的
         Map<Long, Long> chkptDPT = new HashMap<>();
+        //记录哪些事务是活跃的
         Map<Long, Pair<Transaction.Status, Long>> chkptTxnTable = new HashMap<>();
 
         // TODO(proj5): generate end checkpoint record(s) for DPT and transaction table
+
+        //iterate through the dirtyPageTable and copy the entries.
+        for (Map.Entry<Long, Long> entry : dirtyPageTable.entrySet()) {
+            // 检查是否还能添加更多条目
+            if (!EndCheckpointLogRecord.fitsInOneRecord(chkptDPT.size() + 1, chkptTxnTable.size())) {
+                //If at any point, copying the current record would cause the end checkpoint record to be too large,
+                // an end checkpoint record with the copied DPT entries should be appended to the log.
+                LogRecord endRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
+                logManager.appendToLog(endRecord);
+
+                // 清空DPT，继续下一批
+                chkptDPT.clear();
+            }
+            // 添加当前条目
+            chkptDPT.put(entry.getKey(), entry.getValue());
+        }
+
+        //iterate through the transaction table,
+        for (Map.Entry<Long, TransactionTableEntry> entry : transactionTable.entrySet()) {
+            // and copy the status/lastLSN,
+            Long transNum = entry.getKey();
+            Transaction.Status status = entry.getValue().transaction.getStatus();
+            Long lastLSN = entry.getValue().lastLSN;
+
+            // outputting end checkpoint records only as needed.
+            if (!EndCheckpointLogRecord.fitsInOneRecord(chkptDPT.size(), chkptTxnTable.size() + 1)) {
+
+                LogRecord endRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
+                logManager.appendToLog(endRecord);
+
+                // 清空所有临时表
+                chkptDPT.clear();
+                chkptTxnTable.clear();
+            }
+            // 添加当前事务信息
+            chkptTxnTable.put(transNum, new Pair<>(status, lastLSN));
+        }
+
 
         // Last end checkpoint record
         LogRecord endRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
