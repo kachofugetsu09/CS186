@@ -274,7 +274,19 @@ public class ARIESRecoveryManager implements RecoveryManager {
         assert (before.length == after.length);
         assert (before.length <= BufferManager.EFFECTIVE_PAGE_SIZE / 2);
         // TODO(proj5): implement
-        return -1L;
+        TransactionTableEntry transactionEntry = transactionTable.get(transNum);
+        if (transactionEntry == null) {
+            throw new IllegalArgumentException("Transaction " + transNum + " not found.");
+        }
+
+        long prevLSN = transactionEntry.lastLSN;
+        LogRecord record = new UpdatePageLogRecord(transNum, pageNum, prevLSN, pageOffset, before, after);
+        
+        long LSN =  logManager.appendToLog(record);
+        transactionEntry.lastLSN = LSN;
+        transactionTable.get(transNum).lastLSN = LSN;
+        dirtyPage(pageNum, LSN);
+        return LSN;
     }
 
     /**
