@@ -645,7 +645,150 @@ public class ARIESRecoveryManager implements RecoveryManager {
         // Set of transactions that have completed
         Set<Long> endedTransactions = new HashSet<>();
         // TODO(proj5): implement
+        Iterator<LogRecord> logIterator = logManager.scanFrom(LSN);
+
+        while(logIterator.hasNext()){
+            LogRecord logRecord = logIterator.next();
+
+            //1.如果是事务操作的记录，如果不在事务表当中添加到事务表当中，更新事务的lastLSN
+            if(logRecord.getTransNum().isPresent()){
+                long transNum = logRecord.getTransNum().get();
+                if (!transactionTable.containsKey(transNum)) {
+                    Transaction transaction = newTransaction.apply(transNum);
+                    startTransaction(transaction);
+                }
+
+                transactionTable.get(transNum).lastLSN = logRecord.getLSN();
+            }
+
+            //2.如果是页面操作相关的record，更新脏页表
+            if(logRecord.getPageNum().isPresent()) {
+                long pageNum = logRecord.getPageNum().get();
+                LogType type = logRecord.getType();
+                
+                if (type == LogType.UPDATE_PAGE || type == LogType.UNDO_UPDATE_PAGE) {
+                    dirtyPage(pageNum, logRecord.getLSN());
+                } else if (type == LogType.FREE_PAGE || type == LogType.UNDO_ALLOC_PAGE) {
+                    dirtyPageTable.remove(pageNum);
+                }
+                // ALLOC_PAGE 和 UNDO_FREE_PAGE 不需要操作
+            }
+
+            //3.事务状态变化的日志记录
+            LogType type = logRecord.getType();
+            if(type == LogType.COMMIT_TRANSACTION){
+                long transNum = logRecord.getTransNum().get();
+                TransactionTableEntry transactionEntry = transactionTable.get(transNum);
+                transactionEntry.transaction.setStatus(Transaction.Status.COMMITTING);
+            }
+            else if(type == LogType.ABORT_TRANSACTION){
+                long transNum = logRecord.getTransNum().get();
+                TransactionTableEntry transactionEntry = transactionTable.get(transNum);
+                transactionEntry.transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
+            }
+            else if(type == LogType.END_TRANSACTION){
+                long transNum = logRecord.getTransNum().get();
+                TransactionTableEntry transactionEntry = transactionTable.get(transNum);
+                transactionEntry.transaction.cleanup();
+                transactionEntry.transaction.setStatus(Transaction.Status.COMPLETE);
+                endedTransactions.add(transNum);
+                transactionTable.remove(transNum);
+            }
+            else if(type == LogType.END_CHECKPOINT){
+                EndCheckpointLogRecord checkpointRecord = (EndCheckpointLogRecord) logRecord;
+
+                // 处理 DPT
+                for(Map.Entry<Long, Long> entry : checkpointRecord.getDirtyPageTable().entrySet()) {
+                    dirtyPageTable.put(entry.getKey(), entry.getValue());
+                }
+
+                // 处理事务表
+                for(Map.Entry<Long, Pair<Transaction.Status, Long>> entry : checkpointRecord.getTransactionTable().entrySet()) {
+                    long transNum = entry.getKey();
+                    Transaction.Status checkpointStatus = entry.getValue().getFirst();
+                    long checkpointLastLSN = entry.getValue().getSecond();
+
+                    // 跳过已结束的事务
+                    if (endedTransactions.contains(transNum)) {
+                        continue;
+                    }
+
+                    // 如果事务表中没有此事务，创建并添加
+                    if (!transactionTable.containsKey(transNum)) {
+                        Transaction transaction = newTransaction.apply(transNum);
+                        startTransaction(transaction);
+                    }
+
+                    TransactionTableEntry tableEntry = transactionTable.get(transNum);
+
+                    // 更新 lastLSN（使用较大的值）
+                    if (checkpointLastLSN >= tableEntry.lastLSN) {
+                        tableEntry.lastLSN = checkpointLastLSN;
+                    }
+
+                    // 更新状态（检查状态转换是否合法）
+                    Transaction.Status currentStatus = tableEntry.transaction.getStatus();
+                    if (canChange(currentStatus, checkpointStatus)) {
+                        // 如果检查点显示事务正在中止，而我们的内存表显示其正在运行，
+                        // 我们应该将内存状态更新为恢复中止*，因为有可能从运行状态过渡到中止状态。* 如果检查点显示中止，请确保设置为恢复中止而不是中止
+                        if (checkpointStatus == Transaction.Status.ABORTING) {
+                            tableEntry.transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
+                        } else {
+                            tableEntry.transaction.setStatus(checkpointStatus);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 最后处理事务表中剩余的事务（在循环外部）
+        Iterator<Map.Entry<Long, TransactionTableEntry>> iterator = transactionTable.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<Long, TransactionTableEntry> entry = iterator.next();
+            long transNum = entry.getKey();
+            TransactionTableEntry tableEntry = entry.getValue();
+            Transaction.Status status = tableEntry.transaction.getStatus();
+
+            if (status == Transaction.Status.COMMITTING) {
+                //状态为 COMMITTING 的所有事务应被终止（ cleanup() ，状态设置为 COMPLETE ，写入结束事务记录，并从事务表中移除）。
+                tableEntry.transaction.cleanup();
+                tableEntry.transaction.setStatus(Transaction.Status.COMPLETE);
+                long endLSN = logManager.appendToLog(new EndTransactionLogRecord(transNum, tableEntry.lastLSN));
+                iterator.remove();
+            } else if (status == Transaction.Status.RUNNING) {
+                //状态为 RUNNING 的所有事务应移入 RECOVERY_ABORTING 状态，并写入中止事务记录。
+                tableEntry.transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
+                long abortLSN = logManager.appendToLog(new AbortTransactionLogRecord(transNum, tableEntry.lastLSN));
+                tableEntry.lastLSN = abortLSN;
+            }
+            // 对于处于 RECOVERY_ABORTING 状态的事务，无需执行任何操作。
+        }
         return;
+    }
+
+    private boolean canChange(Transaction.Status currentStatus, Transaction.Status checkpointStatus) {
+        if (currentStatus == checkpointStatus) {
+            return false;
+        }
+
+        switch (currentStatus) {
+            case RUNNING:
+                return checkpointStatus == Transaction.Status.COMMITTING ||
+                        checkpointStatus == Transaction.Status.ABORTING;
+
+            case COMMITTING:
+                return checkpointStatus == Transaction.Status.COMPLETE;
+
+            case ABORTING:
+            case RECOVERY_ABORTING:
+                return checkpointStatus == Transaction.Status.COMPLETE;
+
+            case COMPLETE:
+                return false;
+
+            default:
+                return false;
+        }
     }
 
     /**
