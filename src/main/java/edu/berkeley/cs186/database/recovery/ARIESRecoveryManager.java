@@ -462,6 +462,13 @@ public class ARIESRecoveryManager implements RecoveryManager {
         long savepointLSN = transactionEntry.getSavepoint(name);
 
         // TODO(proj5): implement
+
+        if (savepointLSN == -1) {
+            throw new IllegalArgumentException("Savepoint " + name + " not found for transaction " + transNum);
+        }
+
+        rollbackToLSN(transNum, savepointLSN);
+
         return;
     }
 
