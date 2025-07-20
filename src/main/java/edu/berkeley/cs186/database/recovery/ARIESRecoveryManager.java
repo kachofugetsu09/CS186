@@ -804,7 +804,43 @@ public class ARIESRecoveryManager implements RecoveryManager {
      *   the pageLSN is checked, and the record is redone if needed.
      */
     void restartRedo() {
+
+        if (dirtyPageTable.isEmpty()) {
+            return;
+        }
         // TODO(proj5): implement
+        long startLSN = Collections.min(dirtyPageTable.values());
+        Iterator<LogRecord> logIterator = logManager.scanFrom(startLSN);
+        while(logIterator.hasNext()){
+            LogRecord record = logIterator.next();
+            if(record.isRedoable()){
+                if(record.getType() == LogType.ALLOC_PART|| record.getType() == LogType.FREE_PART ||
+                        record.getType() == LogType.UNDO_ALLOC_PART || record.getType() == LogType.UNDO_FREE_PART) {
+
+                    record.redo(this, diskSpaceManager, bufferManager);
+                } else if (record.getType() == LogType.ALLOC_PAGE || record.getType() == LogType.UNDO_FREE_PAGE) {
+
+                    record.redo(this, diskSpaceManager, bufferManager);
+                }
+                else if(record.getType() == LogType.UPDATE_PAGE|| record.getType() == LogType.UNDO_UPDATE_PAGE ||
+                        record.getType() == LogType.UNDO_ALLOC_PAGE || record.getType() == LogType.FREE_PAGE ){
+                    if(record.getPageNum().isPresent() && dirtyPageTable.containsKey(record.getPageNum().get())) {
+                        if(record.getLSN() >= dirtyPageTable.get(record.getPageNum().get())) {
+                            long pageNum =record.getPageNum().get();
+
+                            Page page = bufferManager.fetchPage(new DummyLockContext(),pageNum);
+                            try{
+                                if(page.getPageLSN() < record.getLSN()){
+                                    record.redo(this, diskSpaceManager, bufferManager);
+                                }
+                            }finally {
+                                page.unpin();
+                            }
+                        }
+                    }
+                }
+            }
+        }
         return;
     }
 
